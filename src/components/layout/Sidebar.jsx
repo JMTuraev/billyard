@@ -17,6 +17,7 @@ const navigation = [
   { name: "Dashboard", path: "/", icon: HomeIcon, roles: ["owner", "staff"] },
   { name: "Tables", path: "/tables", icon: ChartPieIcon, roles: ["owner", "staff"] },
   { name: "Stats", path: "/stats", icon: ChartPieIcon, roles: ["owner"] }, // faqat owner
+  { name: "Sessions", path: "/sessions", icon: ChartPieIcon, roles: ["owner"] }, // faqat owner
 ];
 
 function classNames(...classes) {

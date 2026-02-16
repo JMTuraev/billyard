@@ -9,117 +9,91 @@ import {
   CartesianGrid,
 } from "recharts";
 
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
+
+import { db } from "../services/firebase";
+import { useAuth } from "../context/AuthContext";
 export default function Statistics() {
+  const clubId = "club_1"; // vaqtincha hardcode
+
   const [chartData, setChartData] = useState([]);
 
   useEffect(() => {
-    generateMockData();
+    fetchRevenue();
   }, []);
 
-  const generateMockData = () => {
-    const last30 = [];
-    const now = new Date();
+  const fetchRevenue = async () => {
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, "clubs", clubId, "sessions"),
+          where("status", "==", "closed")
+        )
+      );
 
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(now.getDate() - i);
+      console.log("Docs found:", snapshot.size);
 
-      const fullDate = d.toISOString().split("T")[0];
+      const sessions = snapshot.docs.map(doc => doc.data());
 
-      const randomAmount =
-        Math.random() > 0.2
-          ? Math.floor(Math.random() * 5000000)
-          : 0;
+      const now = new Date();
+      const last30 = [];
 
-      last30.push({
-        date: fullDate.slice(5),
-        amount: randomAmount,
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(now.getDate() - i);
+        const fullDate = d.toISOString().split("T")[0];
+
+        last30.push({
+          date: fullDate.slice(5),
+          full: fullDate,
+          amount: 0,
+        });
+      }
+
+      sessions.forEach((s) => {
+        const index = last30.findIndex(
+          (d) => d.full === s.workDate
+        );
+
+        if (index !== -1) {
+          last30[index].amount += Number(s.amountPaid) || 0;
+        }
       });
-    }
 
-    setChartData(last30);
+      setChartData(last30);
+
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  const formatMoney = (num) =>
-    num?.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-
   return (
-    <div className="min-h-screen bg-[#0f172a] text-white px-10 pt-10">
-
+    <div className="min-h-screen bg-[#0f172a] text-white p-10">
       <h1 className="text-2xl font-semibold mb-8">
         Last 30 Days Revenue
       </h1>
 
-      <div className="w-full h-[260px]">
-
+      <div className="w-full h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
-
-            {/* faqat horizontal line */}
-            <CartesianGrid
-              vertical={false}
-              stroke="#1e293b"
-              strokeDasharray="3 3"
-            />
-
-            <XAxis
-              dataKey="date"
-              stroke="#94a3b8"
-              tick={{ fontSize: 12 }}
-              axisLine={false}
-              tickLine={false}
-              interval={4}   // har 5 kunda bir
-            />
-
-            <YAxis
-              stroke="#94a3b8"
-              tick={{ fontSize: 12 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(value) =>
-                value >= 1000000
-                  ? `${value / 1000000}M`
-                  : value >= 1000
-                  ? `${value / 1000}K`
-                  : value
-              }
-            />
-
-            <Tooltip
-              cursor={false}
-              formatter={(value) =>
-                `${formatMoney(value)} so'm`
-              }
-              contentStyle={{
-                backgroundColor: "#111827",
-                border: "none",
-                borderRadius: "8px",
-                color: "#fff",
-              }}
-            />
-
+            <CartesianGrid vertical={false} stroke="#1e293b" />
+            <XAxis dataKey="date" stroke="#94a3b8" />
+            <YAxis stroke="#94a3b8" />
+            <Tooltip />
             <Line
               type="monotone"
               dataKey="amount"
               stroke="#60a5fa"
               strokeWidth={2}
-              dot={{
-                r: 4,
-                stroke: "#60a5fa",
-                strokeWidth: 2,
-                fill: "#0f172a",
-              }}
-              activeDot={{
-                r: 6,
-                fill: "#60a5fa",
-              }}
             />
-
           </LineChart>
         </ResponsiveContainer>
-
       </div>
-
     </div>
   );
 }

@@ -4,8 +4,9 @@ import { AuthProvider } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Tables from "./pages/Tables";
-import Statistics from "./pages/Statistics"; // 🔥 TO‘G‘RI IMPORT
+import Statistics from "./pages/Statistics";
 import Unauthorized from "./pages/Unauthorized";
+import Sessions from "./pages/Sessions";
 
 import PrivateRoute from "./components/routes/PrivateRoute";
 import RoleGuard from "./components/routes/RoleGuard";
@@ -16,7 +17,7 @@ function App() {
     <AuthProvider>
       <Routes>
 
-        {/* PUBLIC ROUTES */}
+        {/* PUBLIC */}
         <Route path="/login" element={<Login />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
 
@@ -28,10 +29,8 @@ function App() {
             </PrivateRoute>
           }
         >
-          {/* Dashboard */}
           <Route index element={<Dashboard />} />
 
-          {/* Tables */}
           <Route
             path="tables"
             element={
@@ -41,18 +40,28 @@ function App() {
             }
           />
 
-          {/* Statistics */}
           <Route
             path="stats"
             element={
               <RoleGuard allow={["owner"]}>
-                <Statistics />   {/* 🔥 TO‘G‘RI COMPONENT */}
+                <Statistics />
+              </RoleGuard>
+            }
+          />
+
+          <Route
+            path="sessions"
+            element={
+              <RoleGuard allow={["owner"]}>
+                <Sessions />
               </RoleGuard>
             }
           />
         </Route>
 
-      </Routes>
+
+
+      </Routes> 
     </AuthProvider>
   );
 }
