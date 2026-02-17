@@ -1,89 +1,76 @@
-import { Dialog } from "@headlessui/react";
 import { useState } from "react";
-import { collection, addDoc } from "firebase/firestore";
+import { addDoc, collection } from "firebase/firestore";
 import { db } from "../../services/firebase";
 
-export default function AddTableModal({ open, setOpen, clubId }) {
-  const [name, setName] = useState("");
+export default function AddTableModal({ clubId, onClose }) {
   const [number, setNumber] = useState("");
-  const [pricePerHour, setPricePerHour] = useState("");
+  const [price, setPrice] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async () => {
-    if (!name || !number || !pricePerHour) return;
+  const handleAdd = async () => {
+    if (!number || !price) return;
 
-    await addDoc(
-      collection(db, "clubs", clubId, "tables"),
-      {
-        name,
-        number: Number(number),
-        pricePerHour: Number(pricePerHour),
-        status: "idle",
-        startedAt: null,
-        createdAt: new Date(),
-      }
-    );
+    try {
+      setLoading(true);
 
-    setName("");
-    setNumber("");
-    setPricePerHour("");
-    setOpen(false);
+      await addDoc(
+        collection(db, "clubs", clubId, "tables"),
+        {
+          number: Number(number),
+          pricePerHour: Number(price),
+          status: "free",
+          createdAt: new Date(),
+        }
+      );
+
+      onClose();
+    } catch (err) {
+      console.error("Add table error:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <Dialog open={open} onClose={setOpen} className="relative z-50">
-      <div className="fixed inset-0 bg-black/60" />
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+      <div className="bg-gray-900 p-8 rounded-xl w-96">
+        <h2 className="text-xl font-semibold mb-6">
+          Add New Table
+        </h2>
 
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="w-full max-w-md rounded-xl bg-gray-900 p-6 text-white shadow-xl">
+        <input
+          type="number"
+          placeholder="Table number"
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+          className="w-full mb-4 p-2 rounded bg-gray-800 border border-white/10"
+        />
 
-          <Dialog.Title className="text-lg font-semibold mb-4">
-            Add New Table
-          </Dialog.Title>
+        <input
+          type="number"
+          placeholder="Price per hour"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          className="w-full mb-6 p-2 rounded bg-gray-800 border border-white/10"
+        />
 
-          <div className="space-y-4">
+        <div className="flex justify-end gap-4">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-700 rounded"
+          >
+            Cancel
+          </button>
 
-            <input
-              placeholder="Table name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none"
-            />
-
-            <input
-              placeholder="Table number"
-              type="number"
-              value={number}
-              onChange={(e) => setNumber(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none"
-            />
-
-            <input
-              placeholder="Price per hour"
-              type="number"
-              value={pricePerHour}
-              onChange={(e) => setPricePerHour(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none"
-            />
-
-            <div className="flex justify-end gap-3 pt-4">
-              <button
-                onClick={() => setOpen(false)}
-                className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleSubmit}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500"
-              >
-                Add
-              </button>
-            </div>
-
-          </div>
-        </Dialog.Panel>
+          <button
+            onClick={handleAdd}
+            disabled={loading}
+            className="px-4 py-2 bg-indigo-600 rounded"
+          >
+            {loading ? "Adding..." : "Add"}
+          </button>
+        </div>
       </div>
-    </Dialog>
+    </div>
   );
 }
