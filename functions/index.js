@@ -15,6 +15,7 @@ const db = admin.firestore();
 setGlobalOptions({
   region: "europe-west1",
   maxInstances: 10,
+  memory: "512MiB",
 });
 
 const TUYA_ACCESS_ID = defineSecret("TUYA_ACCESS_ID");
@@ -22,98 +23,125 @@ const TUYA_ACCESS_SECRET = defineSecret("TUYA_ACCESS_SECRET");
 
 const TUYA_ENDPOINT = "https://openapi.tuyaeu.com";
 
-/* ================= SIGN ================= */
-function sign(method, path, body, t, ACCESS_ID, ACCESS_SECRET, token = "") {
+/* ======================================================
+   TUYA TOKEN CACHE (2 soat amal qiladi)
+====================================================== */
+let cachedToken = null;
+let tokenExpireTime = 0;
+
+async function getToken(ACCESS_ID, ACCESS_SECRET) {
+  const now = Date.now();
+
+  if (cachedToken && now < tokenExpireTime) {
+    return cachedToken;
+  }
+
+  const t = now.toString();
+  const path = "/v1.0/token?grant_type=1";
+
   const contentHash = crypto
     .createHash("sha256")
-    .update(body || "")
+    .update("")
     .digest("hex");
 
-  const stringToSign = [method, contentHash, "", path].join("\n");
-  const signStr = ACCESS_ID + token + t + stringToSign;
+  const stringToSign = ["GET", contentHash, "", path].join("\n");
+  const signStr = ACCESS_ID + t + stringToSign;
 
-  return crypto
+  const sign = crypto
     .createHmac("sha256", ACCESS_SECRET)
     .update(signStr)
     .digest("hex")
     .toUpperCase();
-}
-
-/* ================= GET TOKEN ================= */
-async function getToken(ACCESS_ID, ACCESS_SECRET) {
-  const t = Date.now().toString();
-  const path = "/v1.0/token?grant_type=1";
-
-  const signValue = sign("GET", path, "", t, ACCESS_ID, ACCESS_SECRET);
 
   const res = await axios.get(TUYA_ENDPOINT + path, {
     headers: {
       client_id: ACCESS_ID,
-      sign: signValue,
+      sign,
       t,
       sign_method: "HMAC-SHA256",
     },
   });
 
-  logger.info("TUYA TOKEN RESPONSE:", res.data);
-
   if (!res.data.success) {
-    throw new Error(JSON.stringify(res.data));
+    throw new Error("TUYA TOKEN ERROR: " + JSON.stringify(res.data));
   }
 
-  return res.data.result.access_token;
+  cachedToken = res.data.result.access_token;
+
+  // Tuya token 7200 sekund (2 soat)
+  tokenExpireTime = now + 1000 * 60 * 110; // 110 min buffer bilan
+
+  return cachedToken;
 }
 
-/* ================= SWITCH DEVICE ================= */
+/* ======================================================
+   SWITCH DEVICE
+====================================================== */
 async function switchDevice(deviceId, value, ACCESS_ID, ACCESS_SECRET) {
   const token = await getToken(ACCESS_ID, ACCESS_SECRET);
   const t = Date.now().toString();
 
   const body = JSON.stringify({
-    commands: [
-      {
-        code: "switch_1",
-        value,
-      },
-    ],
+    commands: [{ code: "switch_1", value }],
   });
 
   const path = `/v1.0/iot-03/devices/${deviceId}/commands`;
 
-  const signValue = sign(
-    "POST",
-    path,
-    body,
-    t,
-    ACCESS_ID,
-    ACCESS_SECRET,
-    token
-  );
+  const contentHash = crypto
+    .createHash("sha256")
+    .update(body)
+    .digest("hex");
+
+  const stringToSign = ["POST", contentHash, "", path].join("\n");
+  const signStr = ACCESS_ID + token + t + stringToSign;
+
+  const sign = crypto
+    .createHmac("sha256", ACCESS_SECRET)
+    .update(signStr)
+    .digest("hex")
+    .toUpperCase();
 
   const res = await axios.post(TUYA_ENDPOINT + path, body, {
     headers: {
       client_id: ACCESS_ID,
       access_token: token,
-      sign: signValue,
+      sign,
       t,
       sign_method: "HMAC-SHA256",
       "Content-Type": "application/json",
     },
   });
 
-  logger.info("TUYA SWITCH RESPONSE:", res.data);
+  if (!res.data.success) {
+    throw new Error("TUYA SWITCH ERROR: " + JSON.stringify(res.data));
+  }
 
   return res.data;
 }
 
-/* ================= START TABLE ================= */
+/* ======================================================
+   AUTH MIDDLEWARE
+====================================================== */
+async function verifyUser(req) {
+  const header = req.headers.authorization;
+
+  if (!header || !header.startsWith("Bearer ")) {
+    throw new Error("Unauthorized");
+  }
+
+  const idToken = header.split("Bearer ")[1];
+  return await admin.auth().verifyIdToken(idToken);
+}
+
+/* ======================================================
+   START TABLE
+====================================================== */
 exports.startTable = onRequest(
   { secrets: [TUYA_ACCESS_ID, TUYA_ACCESS_SECRET] },
   (req, res) => {
     cors(req, res, async () => {
       try {
-        logger.info("START REQUEST BODY:", req.body);
-
+        const user = await verifyUser(req);
         const { clubId, tableId } = req.body;
 
         const ACCESS_ID = TUYA_ACCESS_ID.value();
@@ -125,57 +153,70 @@ exports.startTable = onRequest(
           .collection("tables")
           .doc(tableId);
 
-        const tableSnap = await tableRef.get();
-        const table = tableSnap.data();
+        let tableData;
 
-        logger.info("TABLE DATA:", table);
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(tableRef);
+          if (!snap.exists) throw new Error("Table not found");
 
-        if (!table?.deviceId) {
-          return res.status(400).json({ error: "No deviceId" });
-        }
+          const table = snap.data();
+
+          if (table.status === "busy") {
+            throw new Error("Table already busy");
+          }
+
+          if (!table.deviceId) {
+            throw new Error("No device linked");
+          }
+
+          tableData = table;
+
+          const sessionRef = db
+            .collection("clubs")
+            .doc(clubId)
+            .collection("sessions")
+            .doc();
+
+          tx.set(sessionRef, {
+            tableId,
+            deviceId: table.deviceId,
+            openedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "open",
+            pricePerHour: table.pricePerHour,
+            createdBy: user.uid,
+          });
+
+          tx.update(tableRef, {
+            status: "busy",
+            currentSessionId: sessionRef.id,
+          });
+        });
 
         await switchDevice(
-          table.deviceId,
+          tableData.deviceId,
           true,
           ACCESS_ID,
           ACCESS_SECRET
         );
 
-        const sessionRef = await db
-          .collection("clubs")
-          .doc(clubId)
-          .collection("sessions")
-          .add({
-            tableId,
-            tableNumber: table.number,
-            pricePerHour: table.pricePerHour,
-            openedAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: "open",
-            amountPaid: 0,
-          });
-
-        await tableRef.update({
-          status: "busy",
-          currentSessionId: sessionRef.id,
-        });
-
         res.json({ success: true });
-      } catch (error) {
-        logger.error("START ERROR:", error);
-        res.status(500).json({ error: error.message });
+      } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: err.message });
       }
     });
   }
 );
 
-/* ================= STOP TABLE ================= */
+/* ======================================================
+   STOP TABLE
+====================================================== */
 exports.stopTable = onRequest(
   { secrets: [TUYA_ACCESS_ID, TUYA_ACCESS_SECRET] },
   (req, res) => {
     cors(req, res, async () => {
       try {
-        logger.info("STOP REQUEST BODY:", req.body);
-
+        const user = await verifyUser(req);
         const { clubId, tableId } = req.body;
 
         const ACCESS_ID = TUYA_ACCESS_ID.value();
@@ -187,28 +228,66 @@ exports.stopTable = onRequest(
           .collection("tables")
           .doc(tableId);
 
-        const tableSnap = await tableRef.get();
-        const table = tableSnap.data();
+        let tableData;
+        let sessionRef;
 
-        logger.info("TABLE DATA:", table);
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(tableRef);
+          if (!snap.exists) throw new Error("Table not found");
+
+          const table = snap.data();
+
+          if (table.status !== "busy") {
+            throw new Error("Table already free");
+          }
+
+          tableData = table;
+          sessionRef = db
+            .collection("clubs")
+            .doc(clubId)
+            .collection("sessions")
+            .doc(table.currentSessionId);
+
+          const sessionSnap = await tx.get(sessionRef);
+          const session = sessionSnap.data();
+
+          const openedAt = session.openedAt.toDate();
+          const closedAt = new Date();
+
+          const minutes = Math.ceil(
+            (closedAt - openedAt) / 1000 / 60
+          );
+
+          const amount =
+            (minutes / 60) * session.pricePerHour;
+
+          tx.update(sessionRef, {
+            closedAt: admin.firestore.FieldValue.serverTimestamp(),
+            durationMinutes: minutes,
+            totalAmount: Math.round(amount),
+            status: "closed",
+            closedBy: user.uid,
+          });
+
+          tx.update(tableRef, {
+            status: "free",
+            currentSessionId: null,
+          });
+        });
 
         await switchDevice(
-          table.deviceId,
+          tableData.deviceId,
           false,
           ACCESS_ID,
           ACCESS_SECRET
         );
 
-        await tableRef.update({
-          status: "free",
-          currentSessionId: null,
-        });
-
         res.json({ success: true });
-      } catch (error) {
-        logger.error("STOP ERROR:", error);
-        res.status(500).json({ error: error.message });
+      } catch (err) {
+        logger.error(err);
+        res.status(500).json({ error: err.message });
       }
     });
   }
 );
+  

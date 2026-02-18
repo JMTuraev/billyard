@@ -6,11 +6,8 @@ export default function Login() {
   const { user, handleGoogleLogin } = useAuth();
   const navigate = useNavigate();
 
-  // 🔥 Agar login bo‘lsa dashboardga o‘tadi
   useEffect(() => {
-    if (user) {
-      navigate("/");
-    }
+    if (user) navigate("/");
   }, [user, navigate]);
 
   return (

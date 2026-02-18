@@ -2,22 +2,22 @@ import { createContext, useContext, useEffect, useState } from "react";
 import {
   onAuthStateChanged,
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
+  signOut,
 } from "firebase/auth";
 import {
   doc,
   getDoc,
   setDoc,
   serverTimestamp,
-  collection,
+  collectionGroup,
   query,
   where,
   getDocs,
   updateDoc,
 } from "firebase/firestore";
+
 import { auth, db } from "../services/firebase";
-import { collectionGroup } from "firebase/firestore";
 
 const AuthContext = createContext();
 
@@ -28,45 +28,51 @@ export function AuthProvider({ children }) {
 
   const provider = new GoogleAuthProvider();
 
+  /* ================= GOOGLE LOGIN ================= */
   const handleGoogleLogin = async () => {
-    await signInWithRedirect(auth, provider);
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Google login error:", error);
+    }
   };
 
-  useEffect(() => {
-    let unsubscribe;
+  /* ================= LOGOUT ================= */
+  const logout = async () => {
+    await signOut(auth);
+    setUser(null);
+    setUserData(null);
+  };
 
-    const initAuth = async () => {
-      try {
-        await getRedirectResult(auth);
-      } catch (error) {
-        console.error("Redirect error:", error);
+  /* ================= AUTH LISTENER ================= */
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        setUser(null);
+        setUserData(null);
+        setLoading(false);
+        return;
       }
 
-      unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-        if (!currentUser) {
-          setUser(null);
-          setUserData(null);
-          setLoading(false);
-          return;
-        }
+      setUser(currentUser);
 
-        setUser(currentUser);
-
+      try {
         const userRef = doc(db, "users", currentUser.uid);
         const userSnap = await getDoc(userRef);
 
-        // 🔥 1️⃣ Agar users da mavjud bo‘lsa
+        /* ===== 1️⃣ Agar users da mavjud ===== */
         if (userSnap.exists()) {
           setUserData(userSnap.data());
           setLoading(false);
           return;
         }
 
-        // 🔥 2️⃣ Staff collectiondan uid bo‘yicha qidiramiz
+        /* ===== 2️⃣ Staff by UID ===== */
         const staffByUidQuery = query(
           collectionGroup(db, "staff"),
           where("uid", "==", currentUser.uid)
         );
+
         const staffByUidSnap = await getDocs(staffByUidQuery);
 
         if (!staffByUidSnap.empty) {
@@ -89,7 +95,7 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // 🔥 3️⃣ Email match (birinchi login)
+        /* ===== 3️⃣ Staff by Email ===== */
         const staffEmailQuery = query(
           collectionGroup(db, "staff"),
           where("email", "==", currentUser.email)
@@ -101,7 +107,6 @@ export function AuthProvider({ children }) {
           const staffDoc = staffEmailSnap.docs[0];
           const clubId = staffDoc.ref.parent.parent.id;
 
-          // UID ni attach qilamiz
           await updateDoc(staffDoc.ref, {
             uid: currentUser.uid,
           });
@@ -122,7 +127,7 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // 🔥 4️⃣ Owner (yangi user)
+        /* ===== 4️⃣ Owner (new user) ===== */
         await setDoc(userRef, {
           uid: currentUser.uid,
           email: currentUser.email,
@@ -136,21 +141,26 @@ export function AuthProvider({ children }) {
         const newUserSnap = await getDoc(userRef);
         setUserData(newUserSnap.data());
         setLoading(false);
-      });
-    };
+      } catch (error) {
+        console.error("Auth init error:", error);
+        setLoading(false);
+      }
+    });
 
-    initAuth();
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, userData, loading, handleGoogleLogin, setUserData }}
+      value={{
+        user,
+        userData,
+        loading,
+        handleGoogleLogin,
+        logout,
+      }}
     >
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }

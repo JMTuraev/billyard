@@ -14,23 +14,32 @@ import PrivateRoute from "./components/routes/PrivateRoute";
 import RoleGuard from "./components/routes/RoleGuard";
 import DashboardLayout from "./layouts/DashboardLayout";
 
+/* ================= AUTH ROUTING ================= */
+
 function AppRoutes() {
   const { user, userData, loading } = useAuth();
 
-  if (loading) return null;
+  /* 🔥 LOADING STATE */
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center text-lg">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <Routes>
 
-      {/* PUBLIC */}
+      {/* ================= PUBLIC ================= */}
       {!user && (
         <>
           <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </>
       )}
 
-      {/* USER BOR LEKIN CLUB YO‘Q */}
+      {/* ================= USER BOR LEKIN CLUB YO‘Q ================= */}
       {user && !userData?.clubId && (
         <>
           <Route
@@ -41,11 +50,14 @@ function AppRoutes() {
               </PrivateRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/create-company" />} />
+          <Route
+            path="*"
+            element={<Navigate to="/create-company" replace />}
+          />
         </>
       )}
 
-      {/* USER BOR VA CLUB BOR */}
+      {/* ================= USER + CLUB BOR ================= */}
       {user && userData?.clubId && (
         <>
           <Route
@@ -84,7 +96,6 @@ function AppRoutes() {
               }
             />
 
-            {/* 🔥 SETTINGS LAYOUT ICHIDA */}
             <Route
               path="settings"
               element={
@@ -94,19 +105,18 @@ function AppRoutes() {
               }
             />
 
-            {/* UNAUTHORIZED HAM LAYOUT ICHIDA */}
             <Route path="unauthorized" element={<Unauthorized />} />
-
           </Route>
 
-          {/* fallback */}
-          <Route path="*" element={<Navigate to="/" />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </>
       )}
 
     </Routes>
   );
 }
+
+/* ================= APP ROOT ================= */
 
 function App() {
   return (

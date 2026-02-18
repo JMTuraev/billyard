@@ -3,6 +3,8 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "../services/firebase";
 import { useAuth } from "../context/AuthContext";
 
+import { startTable, stopTable } from "../api/tables";
+
 import TablesGrid from "../components/tables/TablesGrid";
 import AddTableModal from "../components/tables/AddTableModal";
 
@@ -44,60 +46,20 @@ export default function Tables() {
   /* ================= START ================= */
   const startSession = async (table) => {
     try {
-      const res = await fetch(
-        "https://europe-west1-billyard-ae9e6.cloudfunctions.net/startTable",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            clubId,
-            tableId: table.id,
-          }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Start failed");
-      }
-
-      console.log("START SUCCESS:", data);
+      await startTable(clubId, table.id);
+      console.log("START SUCCESS");
     } catch (err) {
-      console.error("START ERROR:", err);
-      alert("Start error: " + err.message);
+      alert("Start error: " + err.response?.data?.error);
     }
   };
 
   /* ================= STOP ================= */
   const stopSession = async (table) => {
     try {
-      const res = await fetch(
-        "https://europe-west1-billyard-ae9e6.cloudfunctions.net/stopTable",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            clubId,
-            tableId: table.id,
-          }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Stop failed");
-      }
-
-      console.log("STOP SUCCESS:", data);
+      await stopTable(clubId, table.id);
+      console.log("STOP SUCCESS");
     } catch (err) {
-      console.error("STOP ERROR:", err);
-      alert("Stop error: " + err.message);
+      alert("Stop error: " + err.response?.data?.error);
     }
   };
 
